@@ -28,13 +28,12 @@ export function fail(error: string, status = 400) {
 }
 
 const SUPABASE_NOT_CONFIGURED_MESSAGE =
-  "Supabase is not configured. Update NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.local.";
+  "Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in runtime environment variables.";
 
 export function isSupabaseConfigured() {
-  return !(
-    config.supabase.url.includes("your-project.supabase.co") ||
-    config.supabase.serviceRoleKey.includes("your_service_role_key")
-  );
+  // Supabase now issues multiple key formats (legacy JWT and sb_secret_...).
+  // Treat configuration as valid when both values are present.
+  return Boolean(config.supabase.url?.trim() && config.supabase.serviceRoleKey?.trim());
 }
 
 export function requireSupabaseConfigured() {

@@ -82,15 +82,14 @@ async function readCount(table: string, status?: string): Promise<CountQuery> {
  */
 export async function GET() {
   try {
-    const usingPlaceholderSupabase =
-      config.supabase.url.includes("your-project.supabase.co") ||
-      config.supabase.serviceRoleKey.includes("your_service_role_key");
-    if (usingPlaceholderSupabase) {
+    const missingSupabaseConfig =
+      !config.supabase.url?.trim() || !config.supabase.serviceRoleKey?.trim();
+    if (missingSupabaseConfig) {
       return NextResponse.json(
         {
           ok: false,
           error:
-            "Supabase is not configured. Update NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.local.",
+            "Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in runtime environment variables.",
         },
         { status: 500 }
       );
