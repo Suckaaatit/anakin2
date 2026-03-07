@@ -26,9 +26,22 @@ export const maxDuration = 60;
  */
 export async function POST(req: NextRequest) {
   try {
+    const timestamp = new Date().toISOString();
+    let rawText = '';
+    try {
+      rawText = await req.text();
+    } catch {
+      logWarn('Vapi actions: failed to read request body text');
+    }
+
+    console.log('[VAPI ACTIONS] Received request:', {
+      timestamp,
+      body: rawText ? rawText.slice(0, 500) : 'no body',
+    });
+
     let rawBody: unknown;
     try {
-      rawBody = await req.json();
+      rawBody = rawText ? JSON.parse(rawText) : {};
     } catch {
       logWarn('Vapi actions: invalid JSON body');
       return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
@@ -54,6 +67,7 @@ export async function POST(req: NextRequest) {
 
       for (const toolCall of message.toolCallList as VapiToolCall[]) {
         const toolCallId = toolCall.id;
+        const dedupKey = callId ? `${callId}:${toolCallId}` : toolCallId;
         const functionName = toolCall.function.name;
         let args: Record<string, unknown> = {};
         try {
@@ -66,12 +80,13 @@ export async function POST(req: NextRequest) {
         const { data: existing, error: existingLookupError } = await supabase
           .from('processed_tool_calls')
           .select('response_text')
-          .eq('tool_call_id', toolCallId)
+          .eq('tool_call_id', dedupKey)
           .maybeSingle();
 
         if (existingLookupError) {
           logError('Vapi actions: dedup lookup failed', existingLookupError, {
             toolCallId,
+            dedupKey,
             functionName,
           });
         }
@@ -79,6 +94,7 @@ export async function POST(req: NextRequest) {
         if (existing) {
           logInfo('Vapi actions: returning cached response for duplicate tool call', {
             toolCallId,
+            dedupKey,
             functionName,
           });
           results.push({ toolCallId, result: existing.response_text || 'Processed.' });
@@ -94,17 +110,17 @@ export async function POST(req: NextRequest) {
             .from('processed_tool_calls')
             .upsert(
               {
-                tool_call_id: toolCallId,
+                tool_call_id: dedupKey,
                 function_name: functionName,
                 response_text: response,
               },
               { onConflict: 'tool_call_id' }
             );
         } catch (dedupErr) {
-          logError('Vapi actions: dedup insert failed', dedupErr, { toolCallId, functionName });
+          logError('Vapi actions: dedup insert failed', dedupErr, { toolCallId, dedupKey, functionName });
         }
 
-        logInfo('Vapi actions: tool call processed', { toolCallId, functionName, callId });
+        logInfo('Vapi actions: tool call processed', { toolCallId, dedupKey, functionName, callId });
         results.push({ toolCallId, result: response });
       }
 
@@ -172,6 +188,18 @@ async function handleSendPaymentEmail(
 ): Promise<string> {
   const rawEmail = String(args.email || args.recipient_email || '');
   const email = cleanEmail(rawEmail);
+  const planSelection = parsePlanSelection(args);
+  const prospectName = safeTextArg(args, ['prospect_name', 'name', 'contact_name']);
+  const companyName = safeTextArg(args, ['company_name', 'property_name', 'property']);
+  const paymentLink = planSelection.planTier === 'two_incident' ? config.stripe.link1100 : config.stripe.link650;
+
+  console.log('[SEND EMAIL] Args:', {
+    email,
+    plan_tier: planSelection.planTier,
+    prospect_name: prospectName || null,
+    company_name: companyName || null,
+  });
+  console.log('[SEND EMAIL] Using payment link:', paymentLink);
 
   if (!email || !email.includes('@') || !email.includes('.')) {
     return "I didn't catch a valid email. Could you spell that out for me one more time?";
@@ -236,10 +264,6 @@ async function handleSendPaymentEmail(
     return "I'm having a technical issue. Let me try again.";
   }
 
-  const planSelection = parsePlanSelection(args);
-  const prospectName = safeTextArg(args, ['prospect_name', 'name', 'contact_name']);
-  const companyName = safeTextArg(args, ['company_name', 'property_name', 'property']);
-
   // Update prospect email
   try {
     await supabase
@@ -302,6 +326,7 @@ async function handleSendPaymentEmail(
     company_name: companyName || undefined,
   });
 
+  console.log('[SEND EMAIL] Background dispatch queued:', { callId, prospectId, plan_tier: planSelection.planTier });
   logInfo('send_payment_email: background payment fired', { callId, prospectId, email: email.replace(/(.{2}).*(@.*)/, '$1***$2') });
 
   return "I'm sending that payment link to your email right now. While that's on its way, let me ask you — what's been your biggest challenge with your current setup?";

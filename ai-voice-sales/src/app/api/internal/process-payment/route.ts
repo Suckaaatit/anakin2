@@ -48,6 +48,12 @@ export async function POST(req: NextRequest) {
 
     const { email } = body;
     const { plan_tier, plan_label } = body;
+    console.log('[SEND EMAIL] Args:', {
+      email,
+      plan_tier,
+      prospect_name: body.prospect_name || null,
+      company_name: body.company_name || null,
+    });
 
     const { data: prospectRow, error: prospectLookupError } = await supabase
       .from('prospects')
@@ -73,6 +79,7 @@ export async function POST(req: NextRequest) {
       (selectedPlanTier === 'two_incident'
         ? 'Annual Biohazard Response - 2 Incident Coverage'
         : 'Annual Biohazard Response - 1 Incident Coverage');
+    console.log('[SEND EMAIL] Using payment link:', paymentLink);
 
     // ---- IDEMPOTENCY CHECK ----
     // If the same call was already processed, skip. If partially processed, resume safely.
@@ -113,6 +120,7 @@ export async function POST(req: NextRequest) {
         websiteUrl: config.resend.businessWebsite,
       }),
     });
+    console.log('[SEND EMAIL] Resend result:', JSON.stringify(emailResult));
 
     if (emailResult.error) {
       logError('process-payment: Resend email send failed', new Error(JSON.stringify(emailResult.error)), {
